@@ -10,6 +10,8 @@ import (
 	"syscall"
 
 	"github.com/adnsio/qemu-vmnet/vmnet"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 )
 
 func main() {
@@ -22,19 +24,16 @@ func main() {
 	}
 	defer vmn.Stop()
 
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{
-		Port: 1234,
-	})
+	conn, err := net.ListenPacket("udp", ":1234")
 	if err != nil {
-		fmt.Printf("unable to start the udp connection, %s\n", err.Error())
+		fmt.Printf("unable to start the listener, %s\n", err.Error())
 		os.Exit(1)
 		return
 	}
 	defer conn.Close()
 
-	writeToClientsChan := make(chan []byte)
 	writeToVNNetChan := make(chan []byte)
-	udpAddrs := map[string]*net.UDPAddr{}
+	clients := map[string]net.Addr{}
 
 	go func() {
 		for {
@@ -46,10 +45,38 @@ func main() {
 			}
 
 			bytes = bytes[:bytesLen]
-
 			log.Printf("received %d bytes from vmnet\n", bytesLen)
 
-			writeToClientsChan <- bytes
+			go func(bytes []byte) {
+				pkt := gopacket.NewPacket(bytes, layers.LayerTypeEthernet, gopacket.Default)
+				// log.Printf("%s\n", pkt.String())
+
+				layer := pkt.Layer(layers.LayerTypeEthernet)
+				if layer == nil {
+					return
+				}
+
+				ethLayer, _ := layer.(*layers.Ethernet)
+				destinationMAC := ethLayer.DstMAC.String()
+
+				addr, exist := clients[destinationMAC]
+				if !exist {
+					return
+				}
+
+				log.Printf("writing %d bytes to %s\n", len(bytes), addr.String())
+
+				if _, err := conn.WriteTo(bytes, addr); err != nil {
+					if errors.Is(err, net.ErrClosed) {
+						delete(clients, destinationMAC)
+						log.Printf("deleted client with mac %s\n", destinationMAC)
+						return
+					}
+
+					log.Printf("error while writing to %s: %s\n", addr.String(), err.Error())
+					return
+				}
+			}(bytes)
 		}
 	}()
 
@@ -69,46 +96,32 @@ func main() {
 	go func() {
 		for {
 			bytes := make([]byte, vmn.MaxPacketSize)
-			bytesLen, udpAddr, err := conn.ReadFromUDP(bytes)
+			bytesLen, addr, err := conn.ReadFrom(bytes)
 			if err != nil {
 				if errors.Is(err, net.ErrClosed) {
 					break
 				}
 
-				log.Printf("error while reading from %s: %s\n", udpAddr.String(), err.Error())
+				log.Printf("error while reading from %s: %s\n", addr.String(), err.Error())
 				continue
 			}
 
-			_, exist := udpAddrs[udpAddr.String()]
-			if !exist {
-				udpAddrs[udpAddr.String()] = udpAddr
-			}
-
 			bytes = bytes[:bytesLen]
+			pkt := gopacket.NewPacket(bytes, layers.LayerTypeEthernet, gopacket.Default)
 
-			log.Printf("received %d bytes from %s\n", bytesLen, udpAddr.String())
+			log.Printf("received %d bytes from %s\n", bytesLen, addr.String())
+			// log.Printf("%s\n", pkt.String())
 
-			writeToVNNetChan <- bytes
-		}
-	}()
+			if layer := pkt.Layer(layers.LayerTypeEthernet); layer != nil {
+				eth, _ := layer.(*layers.Ethernet)
 
-	go func() {
-		for {
-			bytes := <-writeToClientsChan
-
-			for _, udpAddr := range udpAddrs {
-				log.Printf("writing %d bytes to %s\n", len(bytes), udpAddr.String())
-
-				if _, err := conn.WriteToUDP(bytes, udpAddr); err != nil {
-					if errors.Is(err, net.ErrClosed) {
-						delete(udpAddrs, udpAddr.String())
-						log.Printf("connection from %s closed\n", udpAddr.String())
-						continue
-					}
-
-					log.Printf("error while writing to %s: %s\n", udpAddr.String(), err.Error())
-					continue
+				_, exist := clients[eth.SrcMAC.String()]
+				if !exist {
+					clients[eth.SrcMAC.String()] = addr
+					log.Printf("new client with mac %s\n", eth.SrcMAC.String())
 				}
+
+				writeToVNNetChan <- bytes
 			}
 		}
 	}()
