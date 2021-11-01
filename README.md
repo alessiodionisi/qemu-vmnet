@@ -25,7 +25,7 @@ sudo qemu-vmnet
 
 ### Add a network device
 
-You need add a new network device to your virtual machine.
+You need to add a new network device to your virtual machine.
 
 Note: `netdev` value is the `id` of the network device, can be any value.
 
