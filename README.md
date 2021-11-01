@@ -55,4 +55,4 @@ Enjoy your fully working networking with a dedicated IP!
 
 No options for now, the UDP listener is announced on port `1234` and `vmnet` is configured in NAT mode.
 
-In the future the UDP port can be changed and maybe `vmnet` can be configure in bridged mode :)
+In the future the UDP port can be changed and maybe `vmnet` can be configured in bridged mode :)
