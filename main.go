@@ -2,35 +2,48 @@ package main
 
 import (
 	"errors"
-	"fmt"
-	"log"
+	"flag"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/adnsio/qemu-vmnet/vmnet"
+	"github.com/adnsio/qemu-vmnet/pkg/vmnet"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 func main() {
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
+	debug := flag.Bool("debug", false, "sets log level to debug")
+	address := flag.String("address", ":2233", "sets the listening address")
+
+	flag.Parse()
+
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	if *debug {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	}
+
 	vmn := vmnet.New()
 
 	if err := vmn.Start(); err != nil {
-		fmt.Printf("unable to start vmnet interface, please try again with \"sudo\"\n")
-		os.Exit(1)
+		log.Fatal().Msg("unable to start vmnet interface, please try again with \"sudo\"")
 		return
 	}
 	defer vmn.Stop()
 
-	conn, err := net.ListenPacket("udp", ":1234")
+	conn, err := net.ListenPacket("udp", *address)
 	if err != nil {
-		fmt.Printf("unable to start the listener, %s\n", err.Error())
-		os.Exit(1)
+		log.Fatal().Msgf("unable to start the listener, %s", err.Error())
 		return
 	}
 	defer conn.Close()
+
+	log.Info().Msgf("listening on %s", conn.LocalAddr())
 
 	writeToVNNetChan := make(chan []byte)
 	clients := map[string]net.Addr{}
@@ -40,16 +53,15 @@ func main() {
 			bytes := make([]byte, vmn.MaxPacketSize)
 			bytesLen, err := vmn.Read(bytes)
 			if err != nil {
-				log.Printf("error while reading from vmnet: %s\n", err.Error())
+				log.Error().Msgf("error while reading from vmnet: %s", err.Error())
 				continue
 			}
 
 			bytes = bytes[:bytesLen]
-			log.Printf("received %d bytes from vmnet\n", bytesLen)
 
 			go func(bytes []byte) {
 				pkt := gopacket.NewPacket(bytes, layers.LayerTypeEthernet, gopacket.Default)
-				// log.Printf("%s\n", pkt.String())
+				log.Debug().Msgf("received %d bytes from vmnet\n%s", len(bytes), pkt.String())
 
 				layer := pkt.Layer(layers.LayerTypeEthernet)
 				if layer == nil {
@@ -64,16 +76,16 @@ func main() {
 					return
 				}
 
-				log.Printf("writing %d bytes to %s\n", len(bytes), addr.String())
+				log.Info().Msgf("writing %d bytes to %s", len(bytes), addr.String())
 
 				if _, err := conn.WriteTo(bytes, addr); err != nil {
 					if errors.Is(err, net.ErrClosed) {
 						delete(clients, destinationMAC)
-						log.Printf("deleted client with mac %s\n", destinationMAC)
+						log.Info().Msgf("deleted client with mac %s", destinationMAC)
 						return
 					}
 
-					log.Printf("error while writing to %s: %s\n", addr.String(), err.Error())
+					log.Error().Msgf("error while writing to %s: %s", addr.String(), err.Error())
 					return
 				}
 			}(bytes)
@@ -84,10 +96,10 @@ func main() {
 		for {
 			bytes := <-writeToVNNetChan
 
-			log.Printf("writing %d bytes to vmnet\n", len(bytes))
+			log.Info().Msgf("writing %d bytes to vmnet", len(bytes))
 
 			if _, err := vmn.Write(bytes); err != nil {
-				log.Printf("error while writing to vmnet: %s\n", err.Error())
+				log.Error().Msgf("error while writing to vmnet: %s", err.Error())
 				continue
 			}
 		}
@@ -102,27 +114,28 @@ func main() {
 					break
 				}
 
-				log.Printf("error while reading from %s: %s\n", addr.String(), err.Error())
+				log.Error().Msgf("error while reading from %s: %s", addr.String(), err.Error())
 				continue
 			}
 
 			bytes = bytes[:bytesLen]
-			pkt := gopacket.NewPacket(bytes, layers.LayerTypeEthernet, gopacket.Default)
 
-			log.Printf("received %d bytes from %s\n", bytesLen, addr.String())
-			// log.Printf("%s\n", pkt.String())
+			go func(bytes []byte) {
+				pkt := gopacket.NewPacket(bytes, layers.LayerTypeEthernet, gopacket.Default)
+				log.Debug().Msgf("received %d bytes from %s\n%s", len(bytes), addr.String(), pkt.String())
 
-			if layer := pkt.Layer(layers.LayerTypeEthernet); layer != nil {
-				eth, _ := layer.(*layers.Ethernet)
+				if layer := pkt.Layer(layers.LayerTypeEthernet); layer != nil {
+					eth, _ := layer.(*layers.Ethernet)
 
-				_, exist := clients[eth.SrcMAC.String()]
-				if !exist {
-					clients[eth.SrcMAC.String()] = addr
-					log.Printf("new client with mac %s\n", eth.SrcMAC.String())
+					_, exist := clients[eth.SrcMAC.String()]
+					if !exist {
+						clients[eth.SrcMAC.String()] = addr
+						log.Info().Msgf("new client with mac %s", eth.SrcMAC.String())
+					}
+
+					writeToVNNetChan <- bytes
 				}
-
-				writeToVNNetChan <- bytes
-			}
+			}(bytes)
 		}
 	}()
 

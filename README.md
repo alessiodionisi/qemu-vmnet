@@ -11,7 +11,11 @@ Native macOS networking for QEMU using `vmnet.framework` and `socket` networking
 
 ### Install qemu-vmnet
 
-The only way for now is to have a working `Go` environment and build `qemu-vmnet` yourself.
+The only way for now is to have a working `Go` environment and install `qemu-vmnet` with:
+
+```shell
+go install github.com/adnsio/qemu-vmnet@latest
+```
 
 ### Start qemu-vmnet
 
@@ -37,14 +41,14 @@ Example:
 
 ### Configure the network device
 
-The network device you just added must be configured to use `socket` networking and UDP port `1234` (can be changed in the future, see [Options](#Options)).
+The network device you just added must be configured to use `socket` networking and UDP port `2233` (can be changed, see [Options](#Options)).
 
 Note: `localaddr` can be any free port, but you must specify it.
 
 Example:
 
 ```
--netdev socket,id=net0,udp=:1234,localaddr=:1235
+-netdev socket,id=net0,udp=:2233,localaddr=:1122
 ```
 
 ### Enjoy
@@ -53,6 +57,7 @@ Enjoy your fully working networking with a dedicated IP!
 
 ## Options
 
-No options for now, the UDP listener is announced on port `1234` and `vmnet` is configured in NAT mode.
+- `-address` sets the listening address (default ":2233")
+- `-debug` sets log level to debug
 
-In the future the UDP port can be changed and maybe `vmnet` can be configured in bridged mode :)
+In the future `vmnet` can be configured in bridged mode :)

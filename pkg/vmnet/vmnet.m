@@ -6,7 +6,7 @@ void _vmnet_start(interface_ref *interface, uint64_t *max_packet_size) {
                             VMNET_SHARED_MODE);
 
   dispatch_queue_t interface_start_queue =
-      dispatch_queue_create("vmkit.vmnet.start", DISPATCH_QUEUE_SERIAL);
+      dispatch_queue_create("vmnet-start", DISPATCH_QUEUE_SERIAL);
   dispatch_semaphore_t interface_start_semaphore = dispatch_semaphore_create(0);
 
   __block interface_ref _interface;
@@ -45,7 +45,7 @@ void _vmnet_stop(interface_ref interface) {
   }
 
   dispatch_queue_t interface_stop_queue =
-      dispatch_queue_create("vmkit.vmnet.stop", DISPATCH_QUEUE_SERIAL);
+      dispatch_queue_create("vmnet-stop", DISPATCH_QUEUE_SERIAL);
   dispatch_semaphore_t interface_stop_semaphore = dispatch_semaphore_create(0);
 
   vmnet_stop_interface(interface, interface_stop_queue,
