@@ -1,0 +1,25 @@
+builds:
+  - goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+signs:
+  - artifacts: checksum
+    args:
+      - "--batch"
+      - "-u"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+
+brews:
+  - tap:
+      owner: adnsio
+      name: homebrew-tap
+    commit_author:
+      name: Alessio Dionisi
+      email: hello@adns.io
