@@ -6,6 +6,9 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
+	"runtime/pprof"
+	"sync"
 	"syscall"
 
 	"github.com/adnsio/qemu-vmnet/pkg/vmnet"
@@ -19,13 +22,34 @@ func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	debug := flag.Bool("debug", false, "sets log level to debug")
+	trace := flag.Bool("trace", false, "sets log level to trace")
 	address := flag.String("address", ":2233", "sets the listening address")
+	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to `file`")
+	memprofile := flag.String("memprofile", "", "write memory profile to `file`")
 
 	flag.Parse()
+
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal().Msgf("could not create CPU profile: %s", err.Error())
+			return
+		}
+		defer f.Close()
+
+		if err := pprof.StartCPUProfile(f); err != nil {
+			log.Fatal().Msgf("could not start CPU profile: %s", err.Error())
+			return
+		}
+		defer pprof.StopCPUProfile()
+	}
 
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	if *debug {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	}
+	if *trace {
+		zerolog.SetGlobalLevel(zerolog.TraceLevel)
 	}
 
 	vmn := vmnet.New()
@@ -47,6 +71,7 @@ func main() {
 
 	writeToVNNetChan := make(chan []byte)
 	clients := map[string]net.Addr{}
+	clientsMutex := sync.Mutex{}
 
 	go func() {
 		for {
@@ -61,7 +86,8 @@ func main() {
 
 			go func(bytes []byte) {
 				pkt := gopacket.NewPacket(bytes, layers.LayerTypeEthernet, gopacket.Default)
-				log.Debug().Msgf("received %d bytes from vmnet\n%s", len(bytes), pkt.String())
+				log.Debug().Msgf("received %d bytes from vmnet", len(bytes))
+				log.Trace().Msg(pkt.String())
 
 				layer := pkt.Layer(layers.LayerTypeEthernet)
 				if layer == nil {
@@ -71,17 +97,21 @@ func main() {
 				ethLayer, _ := layer.(*layers.Ethernet)
 				destinationMAC := ethLayer.DstMAC.String()
 
+				clientsMutex.Lock()
 				addr, exist := clients[destinationMAC]
+				clientsMutex.Unlock()
 				if !exist {
 					return
 				}
 
-				log.Info().Msgf("writing %d bytes to %s", len(bytes), addr.String())
+				log.Debug().Msgf("writing %d bytes to %s", len(bytes), destinationMAC)
 
 				if _, err := conn.WriteTo(bytes, addr); err != nil {
 					if errors.Is(err, net.ErrClosed) {
+						// clientsMutex.Lock()
 						delete(clients, destinationMAC)
-						log.Info().Msgf("deleted client with mac %s", destinationMAC)
+						// clientsMutex.Unlock()
+						log.Debug().Msgf("deleted client with mac %s", destinationMAC)
 						return
 					}
 
@@ -96,7 +126,7 @@ func main() {
 		for {
 			bytes := <-writeToVNNetChan
 
-			log.Info().Msgf("writing %d bytes to vmnet", len(bytes))
+			log.Debug().Msgf("writing %d bytes to vmnet", len(bytes))
 
 			if _, err := vmn.Write(bytes); err != nil {
 				log.Error().Msgf("error while writing to vmnet: %s", err.Error())
@@ -122,15 +152,22 @@ func main() {
 
 			go func(bytes []byte) {
 				pkt := gopacket.NewPacket(bytes, layers.LayerTypeEthernet, gopacket.Default)
-				log.Debug().Msgf("received %d bytes from %s\n%s", len(bytes), addr.String(), pkt.String())
 
 				if layer := pkt.Layer(layers.LayerTypeEthernet); layer != nil {
 					eth, _ := layer.(*layers.Ethernet)
+					sourceMAC := eth.SrcMAC.String()
 
-					_, exist := clients[eth.SrcMAC.String()]
+					log.Debug().Msgf("received %d bytes from %s", len(bytes), sourceMAC)
+					log.Trace().Msg(pkt.String())
+
+					clientsMutex.Lock()
+					_, exist := clients[sourceMAC]
+					clientsMutex.Unlock()
 					if !exist {
-						clients[eth.SrcMAC.String()] = addr
-						log.Info().Msgf("new client with mac %s", eth.SrcMAC.String())
+						clientsMutex.Lock()
+						clients[sourceMAC] = addr
+						clientsMutex.Unlock()
+						log.Debug().Msgf("new client with mac %s", sourceMAC)
 					}
 
 					writeToVNNetChan <- bytes
@@ -142,4 +179,20 @@ func main() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
+
+	if *memprofile != "" {
+		f, err := os.Create(*memprofile)
+		if err != nil {
+			log.Fatal().Msgf("could not create memory profile: %s", err.Error())
+			return
+		}
+		defer f.Close()
+
+		runtime.GC()
+
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			log.Fatal().Msgf("could not write memory profile: %s", err.Error())
+			return
+		}
+	}
 }
