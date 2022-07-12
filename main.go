@@ -108,9 +108,9 @@ func main() {
 
 				if _, err := conn.WriteTo(bytes, addr); err != nil {
 					if errors.Is(err, net.ErrClosed) {
-						// clientsMutex.Lock()
+						clientsMutex.Lock()
 						delete(clients, destinationMAC)
-						// clientsMutex.Unlock()
+						clientsMutex.Unlock()
 						log.Debug().Msgf("deleted client with mac %s", destinationMAC)
 						return
 					}
