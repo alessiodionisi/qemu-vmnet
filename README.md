@@ -5,7 +5,7 @@ Native macOS networking for QEMU using `vmnet.framework` and `socket` networking
 ## Requirements
 
 - macOS 10.10 or later.
-- Any QEMU version that supports `socket` networking), I tested it with 6.1.0 on ARM.
+- Any QEMU version that supports `socket` networking, I tested it with 6.1.0 on ARM.
 
 ## Getting started
 
@@ -58,6 +58,9 @@ Enjoy your fully working networking with a dedicated IP!
 ## Options
 
 - `-address` sets the listening address (default ":2233")
+- `-cpuprofile file` write cpu profile to file
 - `-debug` sets log level to debug
+- `-memprofile file` write memory profile to file
+- `-trace` sets log level to trace
 
 In the future `vmnet` can be configured in bridged mode :)
