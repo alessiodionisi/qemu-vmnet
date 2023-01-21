@@ -14,7 +14,7 @@ Native macOS networking for QEMU using `vmnet.framework` and `socket` networking
 The only way for now is to have a working `Go` environment and install `qemu-vmnet` with:
 
 ```shell
-go install github.com/adnsio/qemu-vmnet@latest
+go install github.com/alessiodionisi/qemu-vmnet@latest
 ```
 
 ### Start qemu-vmnet
