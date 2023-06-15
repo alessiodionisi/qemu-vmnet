@@ -1,6 +1,6 @@
 # qemu-vmnet
 
-> ⚠️ The project has been archived becouse now QEMU supports vmnet natively as network device.
+> ⚠️ The project has been archived because now QEMU supports vmnet natively as network device.
 > See: `qemu-system-aarch64 -machine virt -netdev help`
 
 Native macOS networking for QEMU using `vmnet.framework` and `socket` networking.
